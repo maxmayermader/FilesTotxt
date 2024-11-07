@@ -10,6 +10,7 @@ UTF-8 encoding support
 Skips .idea directories
 ## Usage
 `bash`
+
 `python combine_code.py --src source_directory --output combined.txt `
 
 ## Arguments
