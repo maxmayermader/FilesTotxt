@@ -1,0 +1,1552 @@
+
+==================================================
+File: users/DataAccess.java
+==================================================
+
+package users;
+
+
+import helpers.FileUtils;
+import java.util.ArrayList;
+import java.util.List;
+
+public class DataAccess {
+
+    // Loaders
+    public static List<Student> loadStudents() {
+        List<Student> students = new ArrayList<>();
+        List<String> lines = FileUtils.readFromFile("", "students.txt");
+
+        for (String line : lines) {
+            String[] data = line.split(",");
+            students.add(new Student(data[0], data[1], data[2], data[3]));
+        }
+
+        return students;
+    }
+    public static List<Instructor> loadInstructors() {
+        List<Instructor> instructors = new ArrayList<>();
+        List<String> lines = FileUtils.readFromFile("", "instructors.txt");
+        for (String line : lines) {
+            String[] data = line.split(",");
+            instructors.add(new Instructor(data[0], data[1], data[2]));
+        }
+        return instructors;
+    }
+
+
+
+    // Find student by ID
+    public static Student findStudentById(String id) {
+        List<Student> students = loadStudents();
+
+        for (Student student : students) {
+            if (student.getId().equals(id)) {
+                return student;
+            }
+        }
+        return null;
+    }
+
+
+    public static Instructor findInstructorById(String id) {
+        List<Instructor> instructors = loadInstructors();
+        for (Instructor instructor : instructors) {
+            if (instructor.getId().equals(id)) {
+                return instructor;
+            }
+        }
+        return null;
+    }
+
+    public static Registrar findRegistrarById(String id) {
+        List<String> lines = FileUtils.readFromFile("", "registrar.txt");
+        for (String line : lines) {
+            String[] data = line.split(",");
+            if (data[0].equals(id)) {
+                return new Registrar(data[0], data[1], data[2]);
+            }
+        }
+        return null;
+    }
+
+}
+
+
+
+==================================================
+File: users/Instructor.java
+==================================================
+
+package users;
+
+import helpers.Display;
+import helpers.FileUtils;
+import helpers.User;
+import helpers.Utils;
+import main.Assignment;
+import main.Course;
+import main.Enrollment;
+import main.Submission;
+
+import java.util.ArrayList;
+import java.util.List;
+
+public class Instructor extends User {
+
+    public Instructor(String id, String name, String email) {
+        super(id, name, email);
+    }
+
+    public static Instructor findInstructorById(String id) {
+        return DataAccess.findInstructorById(id);
+    }
+
+    public void gradeAssignments() {
+        // Display all available courses before prompting for a course ID
+        Course.displayAllCourses();
+
+        String courseId = Utils.getInput("Enter Course ID: ");
+        Course course = Course.findCourseById(courseId);
+
+        if (course != null && course.getInstructorId().equals(this.id)) {
+            List<Assignment> assignments = Assignment.loadAssignments(courseId);
+            if (assignments.isEmpty()) {
+                Display.displayMessage("No assignments found for this course.");
+                return;
+            }
+
+            Display.displayMessage("Available Assignments:");
+            for (int i = 0; i < assignments.size(); i++) {
+                Assignment assignment = assignments.get(i);
+                Display.displayMessage((i + 1) + ". " + assignment);
+            }
+
+            int assignmentChoice = Integer.parseInt(Utils.getInput("\nChoose an assignment number to grade: ")) - 1;
+            if (assignmentChoice < 0 || assignmentChoice >= assignments.size()) {
+                Display.displayMessage("Invalid choice.");
+                return;
+            }
+
+            Assignment selectedAssignment = assignments.get(assignmentChoice);
+            checkMissingSubmissions(courseId, selectedAssignment);
+            gradeSelectedAssignment(courseId, selectedAssignment);
+        } else {
+            Display.displayMessage("Course not found or you are not the instructor for this course.");
+        }
+    }
+
+
+    private void gradeSelectedAssignment(String courseId, Assignment assignment) {
+        List<Submission> submissions = Submission.loadSubmissions(courseId, assignment.getId());
+
+        if (submissions.isEmpty()) {
+            Display.displayMessage("No submissions found for this assignment.");
+            return;
+        }
+
+        List<String> updatedSubmissions = new ArrayList<>();
+        for (Submission submission : submissions) {
+            String studentId = submission.getStudentId();
+            String grade = submission.getGrade();
+            String submittedDate = submission.getSubmittedDate();
+
+            if ("Not Graded".equals(grade)) {
+                Display.displayMessage("Student ID: " + studentId + ", Submitted on: " + submittedDate);
+                if (isLate(assignment.getDueDate(), submittedDate)) {
+                    Display.displayMessage("This submission is late.\n");
+                }
+
+                String newGrade = Utils.getInput("Enter grade for this assignment: ");
+                submission.setGrade(newGrade);
+            }
+            updatedSubmissions.add(submission.toString());
+        }
+
+        String fileName = "courses/" + courseId + "/submissions.txt";
+        FileUtils.OverwriteFile("", fileName, updatedSubmissions);
+        Display.displayMessage("Grading completed for assignment ID: " + assignment.getId());
+    }
+
+    private void checkMissingSubmissions(String courseId, Assignment assignment) {
+        List<Enrollment> enrollments = Enrollment.loadEnrollments();
+        List<String> enrolledStudentIds = new ArrayList<>();
+        for (Enrollment enrollment : enrollments) {
+            if (enrollment.getCourseId().equals(courseId)) {
+                enrolledStudentIds.add(enrollment.getStudentId());
+            }
+        }
+
+        List<String[]> submissions = Assignment.getSubmissions(courseId, assignment.getId());
+        List<String> studentsWhoSubmitted = new ArrayList<>();
+        for (String[] submission : submissions) {
+            studentsWhoSubmitted.add(submission[2]);
+        }
+
+        Display.displayMessage("Checking for missing submissions...\n");
+        for (String studentId : enrolledStudentIds) {
+            if (!studentsWhoSubmitted.contains(studentId)) {
+                Display.displayMessage("Missing submission for Student ID: " + studentId + " for Assignment ID: " + assignment.getId());
+            }
+        }
+    }
+
+    private boolean isLate(String dueDate, String submittedDate) {
+        return submittedDate.compareTo(dueDate) > 0;
+    }
+}
+
+
+
+==================================================
+File: users/Student.java
+==================================================
+
+package users;
+
+
+
+import helpers.Display;
+import helpers.User;
+import helpers.Utils;
+import main.Assignment;
+import main.Course;
+import main.Enrollment;
+import main.Submission;
+
+import java.io.BufferedReader;
+import java.io.FileReader;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+
+public class Student extends User {
+    private String major;
+
+    public Student(String id, String name, String email, String major) {
+        super(id, name, email);
+        this.major = major;
+    }
+
+    public String getMajor() {
+        return major;
+    }
+
+    public void enrollInCourse() {
+        String courseId = Utils.getInput("\nEnter Course ID to enroll: ");
+        Course course = Course.findCourseById(courseId);
+
+        if (course != null) {
+            if (!Enrollment.checkPrerequisites(this.id, course)) {
+                Display.displayMessage("Prerequisites not met for this course.");
+                return;
+            }
+
+            if (course.isFull()) {
+                Display.displayMessage("This course is full.");
+                return;
+            }
+
+            for (Enrollment enrollment : Enrollment.loadEnrollments()) {
+                if (enrollment.getStudentId().equals(this.id) && enrollment.getCourseId().equals(courseId)) {
+                    Display.displayMessage("You are already enrolled in this course.");
+                    return;
+                }
+            }
+
+            Enrollment enrollment = new Enrollment(this.id, courseId);
+            Enrollment.saveEnrollment(enrollment);
+            course.incrementEnrollment();
+            Display.displayMessage("Enrolled in course " + course.getName());
+        } else {
+            Display.displayMessage("Course not found.");
+        }
+    }
+
+    /**
+     * Change the major of a student
+     */
+    public void changeMajor(){
+        System.out.println("1. View Major");
+        System.out.println("2. Change Major");
+        System.out.println("3. View Department");
+        System.out.println("4. Go Back\n");
+        String num = Utils.getInput("\nChoose an Option to Proceed:");
+
+        switch(num) {
+            case "1":
+                Display.displayMessage("Your current Major is: " + getMajor());
+                return;
+            case "2":
+                Display.displayMessage("Your current Major is: " + getMajor());
+                System.out.println("1. Type 1 to change your major.");
+                System.out.println("2. Press 2 for No, go back.");
+                String choice = Utils.getInput("\nAre you sure you want to change your major?");
+
+                if (choice.equals("1")) {
+                    System.out.println("To choose a new major, select a department to view their majors.");
+                    displayDepartmentNames();
+                } else if (choice.equals("2")) {
+                    changeMajor();
+                } else {
+                    System.out.println("Error");
+                }
+                return;
+            case "3":
+                Display.displayMessage("Your current Major is: " + getStudentDepartment());
+                return;
+            case "4":
+                Display.displayStudentMenu();
+                return;
+
+            default:
+                System.out.println("Yikers");
+        }
+        //displayMajors(selectedDepartment);
+    }
+
+    public List<String> getMajors(String department) {
+        List<String> majors = new ArrayList<>();
+        String filePath = "src/data/majors.txt"; // Update the path as needed
+
+        try (BufferedReader reader = new BufferedReader(new FileReader(filePath))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                String[] parts = line.split(",");
+                if (parts.length > 0 && parts[0].trim().equalsIgnoreCase(department)) {
+                    // Add all majors from parts[1] onward to the majors list
+                    for (int i = 1; i < parts.length; i++) {
+                        majors.add(parts[i].trim());
+                    }
+                    break; // Exit the loop after finding the department
+                }
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        return majors;
+    }
+
+    // Method to display majors for a specified department
+    public void displayMajors(String department) {
+        List<String> majors = getMajors(department);
+        System.out.println("Majors in " + department + " Department:");
+        for (String major : majors) {
+            System.out.println(major);
+        }
+    }
+
+    /**
+     * Helper method to display department names to the console
+     */
+    public void displayDepartmentNames(){
+        List<String> departmentNames = getAllDepartments();
+
+        // Print each department name on its own line
+        for (String department : departmentNames) {
+            Display.displayMessage(department);
+        }
+    }
+
+    /**
+     * @return List of departments in the departments.txt file.
+     */
+    public List<String> getAllDepartments() {
+        List<String> departmentNames = new ArrayList<>();
+
+        String filePath = "src/data/departments.txt";
+        try (BufferedReader reader = new BufferedReader(new FileReader(filePath))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                String[] parts = line.split(",");
+                if (parts.length > 0) {
+                    String departmentName = parts[0].trim();
+                    departmentNames.add(departmentName);
+                }
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        return departmentNames;
+    }
+
+    public String getStudentDepartment() {
+        String filePath = "src/data/majors.txt"; // Update with the correct path
+        try (BufferedReader reader = new BufferedReader(new FileReader(filePath))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                String[] parts = line.split(",");
+                if (parts.length > 1) {
+                    String departmentName = parts[0].trim();
+                    for (int i = 1; i < parts.length; i++) {
+                        if (parts[i].trim().equalsIgnoreCase(major)) {
+                            return departmentName;
+                        }
+                    }
+                }
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return "Department not found";
+    }
+
+    public void submitAssignment() {
+        // Display all enrolled courses for the student
+        Enrollment.displayAllEnrolledCourses(this.id);
+
+        // Ask for course ID
+        String courseId = Utils.getInput("\nEnter Course ID from the list above: ");
+        Course course = Course.findCourseById(courseId);
+        if (course == null) {
+            Display.displayMessage("Invalid Course ID.");
+            return;
+        }
+
+        // Load assignments and display those not yet submitted
+        List<Assignment> assignments = Assignment.loadAssignments(courseId);
+        boolean hasUnsubmittedAssignments = false;
+
+        System.out.println("Assignments not yet submitted:");
+        for (Assignment assignment : assignments) {
+            if (!Submission.isSubmitted(courseId, this.id, assignment.getId())) {
+                System.out.println(assignment);
+                hasUnsubmittedAssignments = true;
+            }
+        }
+
+        if (!hasUnsubmittedAssignments) {
+            Display.displayMessage("All assignments have been submitted for this course.");
+            return;
+        }
+
+        // Ask for assignment ID
+        String assignmentId = Utils.getInput("\nEnter Assignment ID: ");
+        if (Submission.isSubmitted(courseId, this.id, assignmentId)) {
+            Display.displayMessage("This assignment has already been submitted.");
+        } else {
+            Submission.submit(courseId, this.id, assignmentId);
+            Display.displayMessage("Assignment submitted successfully.");
+        }
+    }
+
+
+    public static Student findStudentById(String id) {
+        return DataAccess.findStudentById(id);
+    }
+
+
+}
+
+
+
+
+==================================================
+File: users/Registrar.java
+==================================================
+
+package users;
+
+import helpers.User;
+import helpers.FileUtils;
+import helpers.Display;
+import main.StudentRegistration;
+import main.Transcript;
+import Interfaces.RegistrarInterface;
+
+import java.io.File;
+import java.util.Random;
+
+public class Registrar extends User implements RegistrarInterface {
+
+    public Registrar(String id, String name, String email) {
+        super(id, name, email);
+    }
+
+    @Override
+    public void enrollNewStudent(String fullName, String dateOfBirth, String contactInfo,
+                                 String address, String programOfStudy, String academicTerm) {
+        StudentRegistration registration = new StudentRegistration(
+                fullName, dateOfBirth, contactInfo, address, programOfStudy, academicTerm
+        );
+
+        if (!validateStudentInfo(registration)) {
+            Display.displayMessage("Invalid or incomplete student information.");
+            return;
+        }
+
+        String studentId = generateStudentId();
+        if (DataAccess.findStudentById(studentId) != null) {
+            Display.displayMessage("Error: Student ID already exists.");
+            return;
+        }
+
+        Student newStudent = new Student(studentId, fullName, contactInfo, "");
+        FileUtils.writeToFile("", "students.txt", newStudent.toString());
+
+        // Save additional student information
+        String studentInfo = String.join(",", studentId, dateOfBirth, address,
+                programOfStudy, academicTerm);
+        FileUtils.writeToFile("registrar", "student_details.txt", studentInfo);
+
+        Display.displayMessage("Student successfully enrolled with ID: " + studentId);
+    }
+
+    @Override
+    public void generateTranscript(String studentId) {
+        Student student = DataAccess.findStudentById(studentId);
+        if (student == null) {
+            Display.displayMessage("Student not found.");
+            return;
+        }
+
+        // Create and generate transcript
+        Transcript transcript = new Transcript(studentId);
+        String transcriptContent = transcript.generateTranscript();
+
+        // Save transcript to file with timestamp
+        String timestamp = java.time.LocalDateTime.now().format(
+                java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
+        String fileName = "transcripts/" + studentId + "_" + timestamp + ".txt";
+
+        // Ensure directory exists
+        new File("src/data/registrar/transcripts").mkdirs();
+
+        // Save transcript
+        FileUtils.writeToFile("registrar", fileName, transcriptContent);
+
+        Display.displayMessage("Transcript generated and saved to: " + fileName);
+        Display.displayMessage("\nTranscript Content:\n" + transcriptContent);
+    }
+
+    @Override
+    public boolean validateStudentInfo(StudentRegistration registration) {
+        return registration.validateInformation();
+    }
+
+    @Override
+    public String generateStudentId() {
+        long timestamp = System.currentTimeMillis();
+        Random random = new Random(timestamp);
+        return random.nextInt(9999)+"";
+    }
+
+
+
+
+
+
+}
+
+
+
+==================================================
+File: Main.java
+==================================================
+
+import helpers.Display;
+import helpers.Utils;
+
+public class Main {
+    public static void main(String[] args) {
+            while (true) {
+                System.out.println("\nWelcome to the University System");
+                System.out.println("1. Student Login");
+                System.out.println("2. Instructor Login");
+                System.out.println("3. Faculty Login");
+                System.out.println("4. Registrar Login");
+                System.out.println("5. Exit\n");
+                String choice = Utils.getInput("Choose Option: ");
+
+                switch (choice) {
+                    case "1":
+                        Display.displayStudentMenu();
+                        break;
+                    case "2":
+                        Display.displayInstructorMenu();
+                        break;
+                    case "3":
+                        //TODO @Kev
+                        break;
+                    case "4":
+                        Display.displayRegistrarMenu();
+                        break;
+                    case "5":
+                        System.out.println("End");
+                        return;
+
+                    default:
+                        System.out.println("Bad Baka");
+                }
+            }
+    }
+}
+
+
+==================================================
+File: main/Submission.java
+==================================================
+
+package main;
+
+import helpers.FileUtils;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.List;
+
+public class Submission {
+    private final String id;
+    private final String assignmentId;
+    private final String studentId;
+    private String grade;
+    private final String submittedDate;
+
+    public Submission(String id, String assignmentId, String studentId, String grade, String submittedDate) {
+        this.id = id;
+        this.assignmentId = assignmentId;
+        this.studentId = studentId;
+        this.grade = grade;
+        this.submittedDate = submittedDate;
+    }
+
+    public String getId() { return id; }
+    public String getAssignmentId() { return assignmentId; }
+    public String getStudentId() { return studentId; }
+    public String getGrade() { return grade; }
+    public String getSubmittedDate() { return submittedDate; }
+
+    public void setGrade(String grade) {
+        this.grade = grade;
+    }
+
+    public static List<Submission> loadSubmissions(String courseId, String assignmentId) {
+        List<Submission> submissions = new ArrayList<>();
+        String fileName = "courses/" + courseId + "/submissions.txt";
+
+        FileUtils.readFromFile("", fileName).stream()
+                .map(line -> line.split(","))
+                .filter(data -> data.length >= 5 && data[1].equals(assignmentId))
+                .forEach(data -> submissions.add(new Submission(
+                        data[0], data[1], data[2], data[3], data[4]
+                )));
+
+        return submissions;
+    }
+
+    public static boolean isSubmitted(String courseId, String studentId, String assignmentId) {
+        String fileName = "courses/" + courseId + "/submissions.txt";
+        List<String> submissions = FileUtils.readFromFile("", fileName);
+
+        for (String submission : submissions) {
+            String[] data = submission.split(",");
+            if (data[1].equals(assignmentId) && data[2].equals(studentId)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public static void submit(String courseId, String studentId, String assignmentId) {
+        String submissionId = "sub_" + System.currentTimeMillis();
+        String submittedDate = LocalDate.now().format(DateTimeFormatter.ISO_DATE);
+        String data = submissionId + "," + assignmentId + "," + studentId + ",Not Graded," + submittedDate;
+        String fileName = "courses/" + courseId + "/submissions.txt";
+        FileUtils.writeToFile("", fileName, data);
+    }
+
+    public List<Submission> getSubmissions(String courseId) {
+        return Submission.loadSubmissions(courseId, this.id);
+    }
+
+    @Override
+    public String toString() {
+        return "Submission ID: " + id + ", Assignment ID: " + assignmentId + ", Student ID: " + studentId +
+                ", Grade: " + grade + ", Submitted Date: " + submittedDate;
+    }
+}
+
+
+
+==================================================
+File: main/Transcript.java
+==================================================
+
+package main;
+
+import helpers.FileUtils;
+import users.Student;
+import users.DataAccess;
+import java.util.*;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.stream.Collectors;
+
+public class Transcript {
+    private final Student student;
+    private final List<Enrollment> enrollments;
+    private double gpa;
+    private int creditsCompleted;
+    private int creditsInProgress;
+    private Map<String, CourseRecord> courseRecords;
+    private boolean generateTranscript;
+
+    private static final Map<String, Double> GRADE_POINTS = new HashMap<>();
+
+    static {
+        GRADE_POINTS.put("A", 4.0);
+        GRADE_POINTS.put("A-", 3.7);
+        GRADE_POINTS.put("B+", 3.3);
+        GRADE_POINTS.put("B", 3.0);
+        GRADE_POINTS.put("B-", 2.7);
+        GRADE_POINTS.put("C+", 2.3);
+        GRADE_POINTS.put("C", 2.0);
+        GRADE_POINTS.put("C-", 1.7);
+        GRADE_POINTS.put("D+", 1.3);
+        GRADE_POINTS.put("D", 1.0);
+        GRADE_POINTS.put("F", 0.0);
+    }
+
+    private static class CourseRecord {
+        String courseId;
+        String grade;
+        String term;
+
+        CourseRecord(String courseId, String grade, String term) {
+            this.courseId = courseId;
+            this.grade = grade;
+            this.term = term;
+        }
+    }
+
+    public Transcript(String studentId) {
+        this.student = DataAccess.findStudentById(studentId);
+        this.enrollments = loadEnrollments(studentId);
+        this.courseRecords = loadCourseRecords(studentId);
+        if (student == null || enrollments.isEmpty() || courseRecords.isEmpty()) {
+            System.out.println("Error: Student or course records not found.");
+            this.generateTranscript = false;
+            return;
+        }
+        calculateStats();
+        this.generateTranscript = true;
+    }
+
+    private List<Enrollment> loadEnrollments(String studentId) {
+        return Enrollment.loadEnrollments().stream()
+                .filter(e -> e.getStudentId().equals(studentId))
+                .collect(Collectors.toList());
+    }
+
+    private Map<String, CourseRecord> loadCourseRecords(String studentId) {
+        Map<String, CourseRecord> records = new HashMap<>();
+        List<String> lines = FileUtils.readFromFile("", "grades.txt");
+
+        for (String line : lines) {
+            String[] parts = line.split(",");
+            if (parts[0].equals(studentId)) {
+                records.put(parts[1], new CourseRecord(parts[1], parts[2], parts[3]));
+            }
+        }
+        if (records.isEmpty()) {
+            System.out.println("No course records found for student ID: " + studentId);
+            return null;
+        }
+        return records;
+    }
+
+    private void calculateStats() {
+        double totalPoints = 0;
+        creditsCompleted = 0;
+        creditsInProgress = 0;
+
+        for (Enrollment enrollment : enrollments) {
+            String courseId = enrollment.getCourseId();
+            CourseRecord record = courseRecords.get(courseId);
+
+            if (record != null && record.grade != null) {
+                Double gradePoints = GRADE_POINTS.get(record.grade);
+                if (gradePoints != null) {
+                    totalPoints += gradePoints * 3; // 3 credits per course
+                    creditsCompleted += 3;
+                }
+            } else {
+                creditsInProgress += 3;
+            }
+        }
+
+        this.gpa = creditsCompleted > 0 ? totalPoints / creditsCompleted : 0.0;
+    }
+
+    public String generateTranscript() {
+        if (!generateTranscript) {
+            return "Error: Transcript generation failed.";
+        }
+        StringBuilder transcript = new StringBuilder();
+        String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+
+        // Header
+        transcript.append("OFFICIAL TRANSCRIPT\n");
+        transcript.append("Generated: ").append(timestamp).append("\n\n");
+
+        // Student Information
+        transcript.append("STUDENT INFORMATION\n");
+        transcript.append("==================\n");
+        transcript.append("ID: ").append(student.getId()).append("\n");
+        transcript.append("Name: ").append(student.getName()).append("\n");
+        transcript.append("Email: ").append(student.getEmail()).append("\n\n");
+
+        // Course History
+        transcript.append("COURSE HISTORY\n");
+        transcript.append("=============\n");
+        Map<String, List<CourseRecord>> termRecords = new TreeMap<>();
+
+        for (Enrollment enrollment : enrollments) {
+            String courseId = enrollment.getCourseId();
+            CourseRecord record = courseRecords.get(courseId);
+            String term = record != null ? record.term : "Current Term";
+
+            termRecords.computeIfAbsent(term, k -> new ArrayList<>())
+                    .add(new CourseRecord(courseId,
+                            record != null ? record.grade : "IP",
+                            term));
+        }
+
+        for (Map.Entry<String, List<CourseRecord>> entry : termRecords.entrySet()) {
+            transcript.append("\nTerm: ").append(entry.getKey()).append("\n");
+            for (CourseRecord record : entry.getValue()) {
+                transcript.append(String.format("%-8s %2s credits  Grade: %s\n",
+                        record.courseId,
+                        "3",
+                        record.grade));
+            }
+        }
+
+        // Academic Summary
+        transcript.append("\nACADEMIC SUMMARY\n");
+        transcript.append("================\n");
+        transcript.append(String.format("Cumulative GPA: %.2f\n", gpa));
+        transcript.append(String.format("Credits Completed: %d\n", creditsCompleted));
+        transcript.append(String.format("Credits In Progress: %d\n", creditsInProgress));
+        transcript.append(String.format("Total Credits: %d\n", creditsCompleted + creditsInProgress));
+
+        // Notes
+        transcript.append("\nNOTES\n");
+        transcript.append("=====\n");
+        transcript.append("IP = In Progress\n");
+
+        return transcript.toString();
+    }
+
+    public void saveTranscript() {
+        String fileName = String.format("transcripts/%s_%s.txt",
+                student.getId(),
+                LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss")));
+        FileUtils.writeToFile("registrar", fileName, generateTranscript());
+    }
+}
+
+
+==================================================
+File: main/Course.java
+==================================================
+
+package main;
+
+import helpers.Display;
+import helpers.FileUtils;
+import java.util.ArrayList;
+import java.util.List;
+
+public class Course {
+    private String id;
+    private String name;
+    private String instructorId;
+    private List<String> prerequisites;
+    private int studentsEnrolled;
+    private int classSize;
+    private static List<Course> allCourses = new ArrayList<>();
+
+    public Course(String id, String name, String instructorId, List<String> prerequisites, int studentsEnrolled, int classSize) {
+        this.id = id;
+        this.name = name;
+        this.instructorId = instructorId;
+        this.prerequisites = prerequisites;
+        this.studentsEnrolled = studentsEnrolled;
+        this.classSize = classSize;
+        allCourses.add(this);
+    }
+
+    public String getId() { return id; }
+    public String getName() { return name; }
+    public String getInstructorId() { return instructorId; }
+    public List<String> getPrerequisites() { return prerequisites; }
+    public int getStudentsEnrolled() { return studentsEnrolled; }
+    public int getClassSize() { return classSize; }
+
+    public boolean isFull() {
+        return studentsEnrolled >= classSize;
+    }
+
+    public void incrementEnrollment() {
+        this.studentsEnrolled++;
+    }
+
+    public static List<Course> loadCourses() {
+        List<Course> courses = new ArrayList<>();
+        List<String> lines = FileUtils.readFromFile("", "courses.txt");
+
+        for (String line : lines) {
+            String[] parts = line.split(",", 5);
+            if (parts.length < 5) continue;
+            String id = parts[0].trim();
+            String name = parts[1].trim();
+            String instructorId = parts[2].trim();
+            List<String> prereqs = checkPrerequisites(parts[3].trim());
+            int[] capacity = checkCapacity(parts[4].trim());
+
+            courses.add(new Course(id, name, instructorId, prereqs, capacity[0], capacity[1]));
+        }
+        return courses;
+    }
+
+    private static List<String> checkPrerequisites(String prereqStr) {
+        List<String> prereqs = new ArrayList<>();
+        for (String prereq : prereqStr.replace("[", "").replace("]", "").split(",")) {
+            if (!prereq.trim().isEmpty()) prereqs.add(prereq.trim());
+        }
+        return prereqs;
+    }
+
+    private static int[] checkCapacity(String capacityStr) {
+        String[] parts = capacityStr.replace("[", "").replace("]", "").split(",");
+        int enrolled = Integer.parseInt(parts[0].trim());
+        int size = Integer.parseInt(parts[1].trim());
+        return new int[]{enrolled, size};
+    }
+
+    public static Course findCourseById(String id) {
+        for (Course course : allCourses) {
+
+            if (course.getId().equals(id)) {
+                return course;
+            }
+        }
+        return null;
+    }
+
+    public static void displayAllCourses() {
+        List<Course> courses = loadCourses();
+        Display.displayMessage("\nAvailable Courses:");
+        for (Course course : courses) {
+            Display.displayMessage(course.toString());
+        }
+    }
+
+    @Override
+    public String toString() {
+        return "Course ID: " + id + ", Name: " + name + ", Instructor ID: " + instructorId +
+                ", Prerequisites: " + prerequisites + ", Enrollment: " + studentsEnrolled + "/" + classSize;
+    }
+}
+
+
+
+
+==================================================
+File: main/Assignment.java
+==================================================
+
+package main;
+
+import helpers.FileUtils;
+import java.util.ArrayList;
+import java.util.List;
+
+public class Assignment {
+    private final String id;
+    private final String title;
+    private final String dueDate;
+
+    public Assignment(String id, String title, String dueDate) {
+        this.id = id;
+        this.title = title;
+        this.dueDate = dueDate;
+    }
+
+    public String getId() { return id; }
+    public String getDueDate() { return dueDate; }
+
+    @Override
+    public String toString() {
+        return "Assignment ID: " + id + ", Title: " + title + ", Due Date: " + dueDate;
+    }
+
+    public static List<Assignment> loadAssignments(String courseId) {
+        List<Assignment> assignments = new ArrayList<>();
+        String fileName = "courses/" + courseId + "/assignments.txt";
+        FileUtils.readFromFile("", fileName).stream()
+                .map(line -> line.split(","))
+                .filter(data -> data.length == 3)
+                .forEach(data -> assignments.add(new Assignment(data[0], data[1], data[2])));
+        return assignments;
+    }
+
+    public static List<String[]> getSubmissions(String courseId, String assignmentId) {
+        List<Submission> submissions = Submission.loadSubmissions(courseId, assignmentId);
+        List<String[]> submissionData = new ArrayList<>();
+
+        for (Submission submission : submissions) {
+            String[] data = {
+                    submission.getId(),
+                    submission.getAssignmentId(),
+                    submission.getStudentId(),
+                    submission.getGrade(),
+                    submission.getSubmittedDate()
+            };
+            submissionData.add(data);
+        }
+
+        return submissionData;
+    }
+}
+
+
+
+==================================================
+File: main/StudentRegistration.java
+==================================================
+
+package main;
+
+import java.util.ArrayList;
+import java.util.List;
+
+public class StudentRegistration {
+    private String fullName;
+    private String dateOfBirth;
+    private String contactInfo;
+    private String address;
+    private String programOfStudy;
+    private String academicTerm;
+    private List<String> documents;
+
+    public StudentRegistration(String fullName, String dateOfBirth, String contactInfo,
+                               String address, String programOfStudy, String academicTerm) {
+        this.fullName = fullName;
+        this.dateOfBirth = dateOfBirth;
+        this.contactInfo = contactInfo;
+        this.address = address;
+        this.programOfStudy = programOfStudy;
+        this.academicTerm = academicTerm;
+        this.documents = new ArrayList<>();
+    }
+
+    public boolean validateInformation() {
+        return !fullName.isEmpty() &&
+                !dateOfBirth.isEmpty() &&
+                !contactInfo.isEmpty() &&
+                !address.isEmpty() &&
+                !programOfStudy.isEmpty() &&
+                !academicTerm.isEmpty();
+    }
+
+    // Getters
+    public String getFullName() { return fullName; }
+    public String getDateOfBirth() { return dateOfBirth; }
+    public String getContactInfo() { return contactInfo; }
+    public String getAddress() { return address; }
+    public String getProgramOfStudy() { return programOfStudy; }
+    public String getAcademicTerm() { return academicTerm; }
+}
+
+
+==================================================
+File: main/Enrollment.java
+==================================================
+
+package main;
+
+import helpers.Display;
+import helpers.FileUtils;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Scanner;
+
+public class Enrollment {
+    private String studentId;
+    private String courseId;
+
+    public Enrollment(String studentId, String courseId) {
+        this.studentId = studentId;
+        this.courseId = courseId;
+    }
+
+    public String getStudentId() { return studentId; }
+    public String getCourseId() { return courseId; }
+
+    @Override
+    public String toString() {
+        return studentId + "," + courseId;
+    }
+
+    public static List<Enrollment> loadEnrollments() {
+        List<Enrollment> enrollments = new ArrayList<>();
+        List<String> lines = FileUtils.readFromFile("", "enrollments.txt");
+        for (String line : lines) {
+            String[] data = line.split(",");
+            enrollments.add(new Enrollment(data[0], data[1]));
+        }
+        return enrollments;
+    }
+
+    public static void saveEnrollment(Enrollment enrollment) {
+        FileUtils.writeToFile("", "enrollments.txt", enrollment.toString());
+    }
+
+    public static void displayAllEnrolledCourses(String studentId) {
+        List<Enrollment> enrollments = loadEnrollments();
+        List<Course> enrolledCourses = new ArrayList<>();
+
+        for (Enrollment enrollment : enrollments) {
+            if (enrollment.getStudentId().equals(studentId)) {
+                Course course = Course.findCourseById(enrollment.getCourseId());
+                if (course != null) {
+                    enrolledCourses.add(course);
+                }
+            }
+        }
+
+        if (enrolledCourses.isEmpty()) {
+            Display.displayMessage("No enrolled courses found for student ID: " + studentId);
+        } else {
+            Display.displayMessage("\nEnrolled Courses:");
+            for (Course course : enrolledCourses) {
+                Display.displayMessage(course.getId() + ": " + course.getName() + " Instructor: " + course.getInstructorId());
+            }
+        }
+    }
+
+    public static boolean checkPrerequisites(String studentId, Course course) {
+        List<String> prerequisites = course.getPrerequisites();
+
+        if (prerequisites.isEmpty() || (prerequisites.size() == 1 && prerequisites.get(0).isEmpty())) {
+            return true;
+        }
+
+        List<Enrollment> enrollments = loadEnrollments();
+        List<String> enrolledCourseIds = new ArrayList<>();
+
+        for (Enrollment enrollment : enrollments) {
+            if (enrollment.getStudentId().equals(studentId)) {
+                enrolledCourseIds.add(enrollment.getCourseId());
+            }
+        }
+
+        for (String prereq : prerequisites) {
+            if (!enrolledCourseIds.contains(prereq)) {
+                Display.displayMessage("Missing prerequisite course: " + prereq);
+                return false;
+            }
+        }
+        return true;
+    }
+    public static void dropCourse(String studentId, String courseId) {
+        List<Enrollment> enrollments = loadEnrollments();
+        Enrollment toDrop = null;
+
+        // Check if the student is enrolled in the course
+        for (Enrollment enrollment : enrollments) {
+            if (enrollment.getStudentId().equals(studentId) && enrollment.getCourseId().equals(courseId)) {
+                toDrop = enrollment;
+                break;
+            }
+        }
+
+        if (toDrop == null) {
+            Display.displayMessage("Error: You are not enrolled in this course.");
+            return;
+        }
+
+        // Check if drop period is open
+        if (!isDropPeriodOpen()) {
+            Display.displayMessage("Error: Drop period is closed. Unable to drop the course.");
+            return;
+        }
+
+        // Check for academic or financial consequences
+        
+            // Prompt user for confirmation to proceed or cancel (simulated here)
+            boolean confirmed = getUserConfirmation();
+            if (!confirmed) {
+                Display.displayMessage("Course drop canceled.");
+                return;
+            }
+
+        // Perform course drop
+        enrollments.remove(toDrop);
+        Display.displayMessage("Course dropped successfully. Your updated schedule has been saved.");
+    }
+
+    private static boolean isDropPeriodOpen() {
+        // Placeholder 
+        return true; 
+    }
+
+    private static boolean getUserConfirmation() {
+        Scanner scanner = new Scanner(System.in);
+        while (true) {
+            Display.displayMessage("Do you want to proceed with dropping the course? (yes/no): ");
+            String input = scanner.nextLine().trim().toLowerCase();
+            if (input.equals("yes")) {
+                return true;
+            } else if (input.equals("no")) {
+                return false;
+            } else {
+                Display.displayMessage("Invalid input. Please enter 'yes' or 'no'.");
+            }
+        }
+    }
+}
+
+
+
+==================================================
+File: helpers/FileUtils.java
+==================================================
+
+package helpers;
+
+import java.io.*;
+import java.util.ArrayList;
+import java.util.List;
+
+public class FileUtils {
+
+
+    public static void writeToFile(String directory, String fileName, String data) {
+        try {
+            File dir = new File("src/data/" + directory);
+
+            File file = new File(dir, fileName);
+
+            // Ensure file ends with a newline
+            if (file.exists() && file.length() > 0) {
+                try (RandomAccessFile raf = new RandomAccessFile(file, "rw")) {
+                    raf.seek(file.length() - 1);
+                    if (raf.readByte() != '\n') {
+                        try (BufferedWriter writer = new BufferedWriter(new FileWriter(file, true))) {
+                            writer.newLine();
+                        }
+                    }
+                }
+            }
+
+            // Append new data
+            try (BufferedWriter writer = new BufferedWriter(new FileWriter(file, true))) {
+                writer.write(data);
+                writer.newLine();
+            }
+        } catch (IOException e) {
+            System.out.println("Writing error: " + e.getMessage());
+        }
+    }
+
+
+
+    public static void OverwriteFile(String directory, String fileName, List<String> dataLines) {
+        try {
+            // Ensure directory exists
+            File dir = new File("src/data/" + directory);
+
+            File file = new File(dir, fileName);
+            try (BufferedWriter writer = new BufferedWriter(new FileWriter(file))) {
+                for (String data : dataLines) {
+                    writer.write(data);
+                    writer.newLine();
+                }
+            }
+        } catch (IOException e) {
+            System.out.println("Writing error: " + e.getMessage());
+        }
+    }
+
+    // Read from file and return list of lines
+    public static List<String> readFromFile(String directory, String fileName) {
+        List<String> lines = new ArrayList<>();
+        try {
+            File file = new File("src/data/" + directory, fileName);
+            if (!file.exists()) {
+                return lines;
+            }
+            try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    if (!line.trim().isEmpty()) {
+                        lines.add(line);
+                    }
+                }
+            }
+        } catch (IOException e) {
+            System.out.println("Reading error: " + e.getMessage());
+        }
+        return lines;
+    }
+
+}
+
+
+
+==================================================
+File: helpers/Utils.java
+==================================================
+
+package helpers;
+
+import java.util.Scanner;
+
+public class Utils {
+
+    public static String generateId(String prefix, int number) {
+        return prefix + String.format("%03d", number);
+    }
+
+    // Future use
+
+
+
+    public static String getInput(String prompt) {
+        System.out.print(prompt);
+        Scanner scanner = new Scanner(System.in);
+        return scanner.nextLine();
+    }
+}
+
+
+
+==================================================
+File: helpers/User.java
+==================================================
+
+package helpers;
+
+public abstract class User {
+    protected String id;
+    protected String name;
+    protected String email;
+
+    public User(String id, String name, String email) {
+        this.id = id;
+        this.name = name;
+        this.email = email;
+    }
+
+    public String getId() {
+        return id;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public String getEmail() {
+        return email;
+    }
+
+    @Override
+    public String toString() {
+        return id + "," + name + "," + email;
+    }
+
+}
+
+
+
+==================================================
+File: helpers/Display.java
+==================================================
+
+package helpers;
+
+import main.Course;
+import users.DataAccess;
+import users.Instructor;
+import users.Registrar;
+import users.Student;
+
+
+
+public class Display {
+
+
+
+    public static void displayStudentMenu() {
+        String id = Utils.getInput("Enter Student ID or 'new' to create an account: ");
+        Student student = DataAccess.findStudentById(id);
+        if (id.equalsIgnoreCase("new")) {
+            displayMessage("LOL");
+        } else {
+            student = Student.findStudentById(id);
+            if (student == null) {
+                displayMessage("Student not found.");
+                return;
+            }
+        }
+
+        while (true) {
+            displayMessage("\nStudent Menu:");
+            displayMessage("1 View my Courses");
+            displayMessage("2 Enroll in Course");
+            displayMessage("3 Submit Assignment");
+            displayMessage("4 Select/Edit Major");
+            displayMessage("5 Logout\n");
+            String choice = Utils.getInput("Select an option: ");
+
+            switch (choice) {
+                case "1":
+
+                    break;
+                case "2":
+                    assert student != null;
+                    Course.displayAllCourses();
+                    student.enrollInCourse();
+                    break;
+                case "3":
+                    assert student != null;
+                    student.submitAssignment();
+                    break;
+                case "4":
+                    assert student != null;
+                    student.changeMajor();
+                case "5":
+                    return;
+                default:
+                    displayMessage("Bad Baka");
+            }
+        }
+    }
+
+    public static void displayInstructorMenu() {
+        String id = Utils.getInput("Enter Instructor ID or 'new' to create an account: ");
+        Instructor instructor = DataAccess.findInstructorById(id);
+        if (id.equalsIgnoreCase("new")) {
+            displayMessage("lol");
+        } else {
+            instructor = Instructor.findInstructorById(id);
+            if (instructor == null) {
+                displayMessage("Instructor not found.");
+                return;
+            }
+        }
+
+        while (true) {
+            displayMessage("\nInstructor Menu:");
+            displayMessage("1 Create Assignment");
+            displayMessage("2 Grade Assignments");
+            displayMessage("3 Logout");
+            String choice = Utils.getInput("Select an option: \n");
+
+            switch (choice) {
+                case "1":
+                    //create assigment
+                    break;
+                case "2":
+                    instructor.gradeAssignments();
+                    break;
+                case "3":
+                    return;
+                default:
+                    displayMessage("Bad Baka");
+            }
+        }
+    }
+
+    public static void displayRegistrarMenu() {
+        String id = Utils.getInput("Enter Registrar ID: ");
+//        Registrar registrar = DataAccess.findRegistrarById(id);
+        Registrar registrar = new Registrar("1", "registrar", "jd@em.com");
+
+        if (registrar == null) {
+            displayMessage("Registrar not found.");
+            return;
+        }
+
+        while (true) {
+            displayMessage("\nRegistrar Menu:");
+            displayMessage("1. Register New Student");
+            displayMessage("2. Generate Transcript");
+            displayMessage("3. Logout\n");
+
+            String choice = Utils.getInput("Select an option: ");
+            switch (choice) {
+                case "1":
+                    registerNewStudent(registrar);
+                    break;
+                case "2":
+                    String studentId = Utils.getInput("Enter student ID: ");
+                    registrar.generateTranscript(studentId);
+                    break;
+                case "3":
+                    return;
+                default:
+                    displayMessage("Invalid option");
+            }
+        }
+    }
+
+    private static void registerNewStudent(Registrar registrar) {
+        displayMessage("\nNew Student Registration Form");
+        String fullName = Utils.getInput("Enter full name: ");
+        String dateOfBirth = Utils.getInput("Enter date of birth (YYYY-MM-DD): ");
+        String contactInfo = Utils.getInput("Enter email: ");
+        String address = Utils.getInput("Enter address: ");
+        String programOfStudy = Utils.getInput("Enter program of study: ");
+        String academicTerm = Utils.getInput("Enter academic term (e.g., FALL2024): ");
+
+        registrar.enrollNewStudent(fullName, dateOfBirth, contactInfo,
+                address, programOfStudy, academicTerm);
+    }
+
+    public static void displayMessage(String message) {
+        System.out.println(message);
+    }
+
+}
+
+
+
+==================================================
+File: Interfaces/RegistrarInterface.java
+==================================================
+
+package Interfaces;
+
+import main.StudentRegistration;
+
+public interface RegistrarInterface {
+    void enrollNewStudent(String fullName, String dateOfBirth, String contactInfo,
+                          String address, String programOfStudy, String academicTerm);
+    void generateTranscript(String studentId);
+    boolean validateStudentInfo(StudentRegistration registration);
+    String generateStudentId();
+
+}
+
+
+
+
+==================================================
+File: Interfaces/TranscriptInterface.java
+==================================================
+
+package Interfaces;
+
+public interface TranscriptInterface {
+    boolean generateTranscript(String studentId);
+    float calculateGPA(String studentId);
+//    List<Course> getCompletedCourses(String studentId);
+}
+
+
