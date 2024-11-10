@@ -17,7 +17,7 @@ struct Args {
 
 fn combine_code_files(root_dir: &str, output_file: &str) -> io::Result<()> {
     let code_extensions: HashSet<_> = vec![
-        "java", "py", "cpp", "h", "cs", "js", "ts"
+        "java", "py", "cpp", "h", "cs", "js", "ts", "txt"
     ].into_iter().collect();
 
     let mut output = File::create(output_file)?;
